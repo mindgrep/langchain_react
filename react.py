@@ -1,12 +1,15 @@
 from langchain_community.chat_models.huggingface import ChatHuggingFace
-from langchain_community.llms import HuggingFaceHub, Ollama
 from langchain_community.embeddings import HuggingFaceEmbeddings
 from langchain_community.embeddings import OllamaEmbeddings
+from langchain_community.llms import HuggingFaceHub, Ollama
+from langchain_community.vectorstores import FAISS
 from langchain_core.embeddings import Embeddings
 from langchain_core.language_models.llms import LLM
-from langchain_text_splitters import CharacterTextSplitter
-from langchain_community.vectorstores import FAISS
+from langchain_core.output_parsers import StrOutputParser
 from langchain_core.prompts import ChatPromptTemplate
+from langchain_core.runnables import RunnablePassthrough
+from langchain_text_splitters import MarkdownTextSplitter
+from typing import List
 
 def initChatModel(llm: LLM):
     from langchain.schema import (
@@ -24,7 +27,7 @@ def initChatModel(llm: LLM):
     print(res)
 
 def initOllamaModel() -> LLM:
-    llm = Ollama(model="llama2:7b")
+    llm = Ollama(model="llama2")
     return llm
 
 def initHfModel() -> LLM:
@@ -40,7 +43,7 @@ def initHfModel() -> LLM:
     )
 
 def initOllamaEmbeddings() -> Embeddings:
-    return OllamaEmbeddings(model="llama2:7b")
+    return OllamaEmbeddings(model="llama2")
 
 def initHfEmbeddings() -> Embeddings:
     model_name = "sentence-transformers/all-mpnet-base-v2"
@@ -58,9 +61,9 @@ def loadDocuments(docs_dir):
     docs = loader.load()
     return docs
 
-def createRetriever(embeddings: Embeddings, directory: str):
-    text_splitter = CharacterTextSplitter(chunk_size=1000, chunk_overlap=0)
-    documents = loadDocuments(directory)
+def createRetriever(embeddings: Embeddings, directories: List[str]):
+    text_splitter = MarkdownTextSplitter()
+    documents = [document for directory in directories for document in loadDocuments(directory)]
     texts = text_splitter.split_documents(documents)
     db = FAISS.from_documents(texts, embeddings)
     return db.as_retriever()
@@ -79,23 +82,22 @@ def createChatPromptTemplate():
 
 llm = initOllamaModel()
 #response = llm.invoke("tell me a dad joke")
-from langchain_core.output_parsers import StrOutputParser
-from langchain_core.runnables import RunnablePassthrough
-dir = "/home/vikas/.nb/work"
+
+dirs = ["/home/vikas/.nb/devx","/home/vikas/.nb/janus"]
 embeddings = initOllamaEmbeddings()
-#retriever = createRetriever(embeddings, dir)
-testRetriever = createTestRetriever(embeddings)
+retriever = createRetriever(embeddings, dirs)
+# testRetriever = createTestRetriever(embeddings)
 promptWithRetriever = {
-        "context": testRetriever,
+        "context": retriever,
         "question": RunnablePassthrough()
     } | createChatPromptTemplate()
-prompt = ChatPromptTemplate.from_template("Fun math fact about {country}")
+prompt = ChatPromptTemplate.from_template("Summarize topic {topic}")
 chain = (
-    prompt
+    promptWithRetriever
     | llm
     | StrOutputParser()
 )
 while True:
-    country = input("Give me a country and I will tell you something interesting about it: ")
-    response = chain.invoke({"country": country})
+    question = input("Ask me a question about your docs: ")
+    response = chain.invoke({"question": question})
     print(response)
