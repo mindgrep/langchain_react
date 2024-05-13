@@ -13,6 +13,10 @@ langchainhub = "*"
 sentence-transformers = "*"
 unstructured = {extras = ["md"], version = "*"}
 faiss-gpu = "*"
+pipdeptree = "*"
+sqlite-vss = "*"
+langchain-postgres = "*"
+psycopg = "*"
 
 [dev-packages]
 

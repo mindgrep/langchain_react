@@ -1,15 +1,19 @@
+#import cProfile
+from typing import List
+
 from langchain_community.chat_models.huggingface import ChatHuggingFace
-from langchain_community.embeddings import HuggingFaceEmbeddings
-from langchain_community.embeddings import OllamaEmbeddings
+from langchain_community.document_loaders.text import TextLoader
+from langchain_community.embeddings.huggingface import HuggingFaceEmbeddings
+from langchain_community.embeddings.ollama import OllamaEmbeddings
 from langchain_community.llms import HuggingFaceHub, Ollama
-from langchain_community.vectorstores import FAISS
+#from langchain_community.vectorstores.faiss import FAISS
+from langchain_community.vectorstores.sqlitevss import SQLiteVSS
 from langchain_core.embeddings import Embeddings
 from langchain_core.language_models.llms import LLM
 from langchain_core.output_parsers import StrOutputParser
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.runnables import RunnablePassthrough
-from langchain_text_splitters import MarkdownTextSplitter
-from typing import List
+from langchain_text_splitters import MarkdownHeaderTextSplitter
 
 def initChatModel(llm: LLM):
     from langchain.schema import (
@@ -56,16 +60,18 @@ def initHfEmbeddings() -> Embeddings:
     )
 
 def loadDocuments(docs_dir):
-    from langchain_community.document_loaders import DirectoryLoader
-    loader = DirectoryLoader(docs_dir, glob="**/*.md")
+    from langchain_community.document_loaders.directory import DirectoryLoader
+    loader = DirectoryLoader(docs_dir, glob="**/*.md", loader_cls=TextLoader)
     docs = loader.load()
     return docs
 
 def createRetriever(embeddings: Embeddings, directories: List[str]):
-    text_splitter = MarkdownTextSplitter()
     documents = [document for directory in directories for document in loadDocuments(directory)]
-    texts = text_splitter.split_documents(documents)
-    db = FAISS.from_documents(texts, embeddings)
+    markdown_header_text_splitter = MarkdownHeaderTextSplitter(headers_to_split_on=[("#","header1"),("##","header2")])
+    texts = [ text.page_content for document in documents[:1] for text in markdown_header_text_splitter.split_text(document.page_content)]
+    conn = SQLiteVSS.create_connection(':memory:')
+    db = SQLiteVSS('langchain', conn, embeddings, 'vss.db')
+    db = SQLiteVSS.from_texts(texts, embeddings, check_same_thread=False)
     return db.as_retriever()
 
 def createTestRetriever(embeddings: Embeddings):
@@ -80,24 +86,37 @@ def createChatPromptTemplate():
     """
     return ChatPromptTemplate.from_template(template)
 
-llm = initOllamaModel()
-#response = llm.invoke("tell me a dad joke")
+def print_stats():
+    import pstats
+    p = pstats.Stats("react.prof")
+    p.sort_stats("cumulative").print_stats(10)
 
-dirs = ["/home/vikas/.nb/devx","/home/vikas/.nb/janus"]
-embeddings = initOllamaEmbeddings()
-retriever = createRetriever(embeddings, dirs)
-# testRetriever = createTestRetriever(embeddings)
-promptWithRetriever = {
-        "context": retriever,
-        "question": RunnablePassthrough()
-    } | createChatPromptTemplate()
-prompt = ChatPromptTemplate.from_template("Summarize topic {topic}")
-chain = (
-    promptWithRetriever
-    | llm
-    | StrOutputParser()
-)
-while True:
-    question = input("Ask me a question about your docs: ")
-    response = chain.invoke({"question": question})
-    print(response)
+def main():
+    llm = initOllamaModel()
+    #response = llm.invoke("tell me a dad joke")
+
+    #dirs = ["/home/vikas/.nb/devx","/home/vikas/.nb/janus"]
+    embeddings = initOllamaEmbeddings()
+    retriever = createRetriever(embeddings, [])
+    # testRetriever = createTestRetriever(embeddings)
+    promptWithRetriever = {
+            "context": retriever,
+            "question": RunnablePassthrough()
+        } | createChatPromptTemplate()
+    #prompt = ChatPromptTemplate.from_template("Summarize topic {topic}")
+    chain = (
+        promptWithRetriever
+        | llm
+        | StrOutputParser()
+    )
+    while True:
+        question = input("Ask me a question about your docs: ")
+        response = chain.invoke({"question": question})
+        print(response)
+
+main()
+#with cProfile.Profile() as pr:
+    #response = llm.invoke("generate a hello world program in go with no explanation")
+    #print(response)
+    # pr.dump_stats("react.prof")
+    # print_stats()
